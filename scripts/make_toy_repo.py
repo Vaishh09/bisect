@@ -1,5 +1,9 @@
-"""Build a REAL toy git repo (a 'checkout service') with a planted bad commit.
-The bad commit removes a null-session guard; that sha is our ground truth."""
+"""Build a REAL toy git repo with a planted bad commit AND a decoy.
+
+The decoy is the MOST RECENT change to the failing file and is completely benign
+(a comment only). Timing + blast-radius heuristics get fooled by it; only READING
+the diff shows it's harmless and the BAD commit deleted the guard.
+"""
 from __future__ import annotations
 import json, subprocess
 from pathlib import Path
@@ -34,6 +38,7 @@ def main():
 
 
 def process_checkout(user, cart):
+    # Guard: a user must have an active session to check out.
     if user.session is None:
         raise ValueError("no active session")
     total = sum(item.price for item in cart.items)
@@ -61,6 +66,7 @@ log = logging.getLogger("checkout")
 
 
 def process_checkout(user, cart):
+    # Guard: a user must have an active session to check out.
     if user.session is None:
         raise ValueError("no active session")
     log.info("processing checkout for user %s", user.id)
@@ -83,18 +89,34 @@ def process_checkout(user, cart):
 ''')
     shas["BAD"] = commit("refactor: simplify checkout flow", "devuser")
 
+    # THE DECOY — most recent service.py change, comment only. Benign.
+    write("checkout/service.py", '''\
+"""Checkout service."""
+import logging
+log = logging.getLogger("checkout")
+
+
+def process_checkout(user, cart):
+    # NOTE: called on every order; keep this path fast.
+    log.info("processing checkout for user %s", user.id)
+    total = sum(item.price for item in cart.items)
+    return {"user_id": user.id, "session": user.session.id, "total": total}
+''')
+    shas["decoy"] = commit("style: add a clarifying comment to checkout", "arjun")
+
     write("checkout/models.py", REPO.joinpath("checkout/models.py").read_text()
           + '\nclass Coupon:\n    def __init__(self, code): self.code = code\n')
     shas["coupon"] = commit("feat: add coupon model", "arjun")
 
     gt = {"bad_commit_sha": shas["BAD"],
-          "bad_commit_reason": "Removed the null-session guard in checkout/service.py; "
-                               "users without a session hit AttributeError on NoneType.",
+          "decoy_commit_sha": shas["decoy"],
+          "bad_commit_reason": "Removed the null-session guard in checkout/service.py.",
           "all_commits": shas}
     (REPO / "GROUND_TRUTH.json").write_text(json.dumps(gt, indent=2))
     print("Toy repo created at:", REPO)
     print(run("git", "log", "--oneline", "--pretty=format:%h  %an  %s"))
-    print("\nPlanted bad commit:", shas["BAD"][:8])
+    print("\nPlanted bad commit :", shas["BAD"][:8], "(devuser)")
+    print("Decoy commit       :", shas["decoy"][:8], "(arjun, benign, touches same file)")
 
 if __name__ == "__main__":
     main()

@@ -33,33 +33,47 @@ from src.diagnosis.signals import (
 # ----------------------------- deterministic -----------------------------
 
 def _score_commit(commit: CommitInfo, spike_at: datetime,
-                  deploys: list[DeployMarker], sig: Optional[ErrorSignature]) -> tuple[float, str]:
-    """Return (score 0-1, human reason). Pure heuristics, no LLM."""
+                  deploys: list[DeployMarker], sig: Optional[ErrorSignature],
+                  newest_at: datetime, oldest_at: datetime) -> tuple[float, str]:
+    """Return (score 0-1, human reason). Pure heuristics, NO diff reading.
+
+    This is a *reasonable* baseline: it uses the signals a human would eyeball
+    without reading the code — how close the deploy was to the spike, whether the
+    commit touched the failing file, and how recent it is. It deliberately does
+    NOT read the diff, so a benign 'decoy' commit that touched the same file just
+    before the spike can fool it. That gap is exactly what the LLM ranker closes.
+    """
     reasons = []
     score = 0.0
 
-    # Signal 1: time correlation — was this commit deployed just before the spike?
+    # Signal 1: time correlation, GRADED by proximity. A deploy 5s before the
+    # spike is a stronger suspect than one 100s before. (Closest deploy wins —
+    # which is what fools us when a benign deploy lands closest.)
     deployed = next((d for d in deploys if d.sha == commit.sha), None)
     if deployed and deployed.at <= spike_at:
         gap = (spike_at - deployed.at).total_seconds()
-        if gap < 120:
-            score += 0.5
-            reasons.append(f"deployed {gap:.0f}s before the spike")
-        else:
-            score += 0.2
-            reasons.append(f"deployed {gap:.0f}s before the spike")
+        # linear falloff over a 180s window: gap 0 -> 0.55, gap 180+ -> 0.0
+        time_score = max(0.0, 0.55 * (1 - gap / 180.0))
+        score += time_score
+        reasons.append(f"deployed {gap:.0f}s before the spike")
 
     # Signal 2: blast radius — did it touch the file named in the stack trace?
     if sig and sig.file_hint:
         if any(sig.file_hint == f or f.endswith(sig.file_hint) for f in commit.files_changed):
-            score += 0.35
+            score += 0.30
             reasons.append(f"changed {sig.file_hint}, the file in the stack trace")
         elif any("checkout" in f for f in commit.files_changed):
-            score += 0.1
+            score += 0.08
             reasons.append("touched the failing service")
 
-    # Signal 3: weak recency nudge (more recent = slightly more suspect)
-    # (kept small so it can't override the real signals)
+    # Signal 3: recency tiebreaker — when there's no deploy signal, the most
+    # recent change to the failing file looks most suspect. (Also fooled by a
+    # benign recent commit.)
+    span = (newest_at - oldest_at).total_seconds() or 1.0
+    recency = (commit.committed_at - oldest_at).total_seconds() / span
+    score += 0.15 * recency
+    if recency > 0.8 and not deployed:
+        reasons.append("most recent change to the codebase")
 
     if not reasons:
         reasons.append("no strong correlation")
@@ -72,9 +86,11 @@ def rank_deterministic(incident: Incident, limit: int = 10) -> list[SuspectCommi
     sig = error_signature()
     spike_at = incident.alert.fired_at
 
+    newest_at = max(c.committed_at for c in commits)
+    oldest_at = min(c.committed_at for c in commits)
     scored = []
     for c in commits:
-        score, reason = _score_commit(c, spike_at, deploys, sig)
+        score, reason = _score_commit(c, spike_at, deploys, sig, newest_at, oldest_at)
         scored.append((score, c, reason))
     scored.sort(key=lambda t: t[0], reverse=True)
 
