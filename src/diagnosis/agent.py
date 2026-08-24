@@ -171,7 +171,7 @@ def rank_with_claude(incident: Incident, limit: int = 10) -> list[SuspectCommit]
 
     client = Anthropic(api_key=api_key)
     resp = client.messages.create(
-        model="claude-opus-4-20250514",  # any current model string works; swap as needed
+        model="claude-sonnet-4-5",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )

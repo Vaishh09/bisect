@@ -12,6 +12,8 @@ hold. That gap is the headline result.
 """
 from __future__ import annotations
 import json, os, sys, time
+from dotenv import load_dotenv
+load_dotenv()
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
