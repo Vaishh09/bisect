@@ -55,14 +55,14 @@ A deterministic baseline scores commits on these signals. An optional LLM ranker
 
 ## The benchmark
 
-Because the simulator provides ground truth, bisect measures whether diagnosis ranks the known-bad commit. The hard scenarios plant a benign **decoy** commit that touches the same failing file and deploys closest to the spike, so timing and blast-radius heuristics get fooled and only reading the diff finds the real culprit.
+Because the simulator provides ground truth, bisect measures whether diagnosis ranks the known-bad commit. The corpus is 9 adversarial scenarios spanning 3 services (checkout, payments, auth) and 3 distinct bug classes (a NoneType dereference, a division by zero, and a dropped dictionary key). Each scenario plants a known-bad commit surrounded by benign **decoys** that touch the same file, and is run under 3 timing variants: a clean deploy marker, a benign decoy deployed closest to the spike, and no deploy marker at all. That mix means timing and blast-radius heuristics get fooled and only reading the diff finds the real culprit.
 
 | Mode | Commit top-1 | Commit top-3 | Runbook hit | Latency |
 | --- | :---: | :---: | :---: | :---: |
-| deterministic baseline | 33% | 100% | 100% | ~190 ms |
-| LLM diff-reading | 100% | 100% | 100% | ~8-11 s |
+| deterministic baseline | 33% | 100% | 100% | ~450 ms |
+| LLM diff-reading | 100% | 100% | 100% | ~10 s |
 
-The baseline dropping to 33 percent top-1 on the hard set is the result that matters. It shows that service-matching and timing are not enough, and that reading the diff is what closes the gap. The bad commit stays in the top 3 every run, so the ranker's job is to reorder, not to find a needle. Across 5 runs the LLM diff-reading ranker recovered the correct commit at 100 percent top-1, versus 33 percent for the deterministic baseline, because it reads the actual diffs and is not fooled by the decoy that only added a comment. The trade-off is latency: roughly 8 to 11 seconds per incident against the baseline's 400 milliseconds, which is why a production system runs the fast baseline first and escalates to the model when the ranking is ambiguous.
+The baseline holding at 33 percent top-1 is the result that matters. It aces the 3 clean-deploy scenarios and fails all 6 hard ones, because service-matching and timing cannot tell a benign same-file decoy from the real cause. The bad commit stays in the top 3 every run, so the ranker's job is to reorder, not to find a needle. Across 3 runs the LLM diff-reading ranker recovered the correct commit at 100 percent top-1 on all 9 scenarios, versus 33 percent for the deterministic baseline, because it reads the actual diffs. The trade-off is latency: roughly 10 seconds per incident against the baseline's 450 milliseconds, which is why a production system runs the fast baseline first and escalates to the model when the ranking is ambiguous.
 
 Runbook retrieval is measured separately and reaches 100 percent top-1 across the seeded failure types.
 
