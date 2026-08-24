@@ -10,3 +10,4 @@ chroma_db/
 data/generated/
 .DS_Store
 .pytest_cache/
+data/toy_repo/
