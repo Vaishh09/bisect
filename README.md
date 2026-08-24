@@ -1,4 +1,4 @@
-# Bisect
+# bisect
 
 An evidence-first AI incident investigator. When a production service breaks, bisect works out what broke, which commit likely caused it, which runbook applies, and how big the impact is, then posts a clean brief and drafts the postmortem once it is resolved.
 
@@ -19,34 +19,26 @@ Two design decisions shape everything:
 One event-driven pipeline. An alert fires and the incident walks through nine stages, each reading and writing a single shared `Incident` object.
 
 ```mermaid
-flowchart TD
-    SIM["Simulator<br/>fake checkout service<br/>logs + metrics + deploys"] --> DET
+flowchart LR
+    SIM["Simulator<br/>logs, metrics, deploys"]:::core
 
-    subgraph LOOP [Incident pipeline]
-        DET["1. Detection<br/>error-rate threshold, sustained"] --> INC(("Incident<br/>object"))
-        INC --> SIG["2. Signal gathering<br/>commits, diffs, deploy markers, error signature"]
-        SIG --> DIAG["3. Diagnosis<br/>rank suspect commits<br/>deterministic + optional LLM diff-reading"]
-        DIAG --> RB["4. Runbook retrieval<br/>TF-IDF match on the error signature"]
-        RB --> IMP["5. Impact estimate<br/>error rate x traffic over the window"]
-        IMP --> BRIEF["6. Incident brief<br/>console or Slack Block Kit"]
-        BRIEF --> REM["7. Remediation<br/>propose actions, PENDING"]
-    end
+    SIM --> DET["1. Detect"]:::done
+    DET --> DIAG["2-3. Diagnose<br/>signals + rank commits"]:::done
+    DIAG --> RB["4-5. Runbook<br/>+ Impact"]:::done
+    RB --> BRIEF["6. Brief<br/>console or Slack"]:::done
+    BRIEF --> GATE{"7. Human<br/>approves?"}:::human
 
-    REM -.->|"human reviews"| HUMAN{{"Authorized human<br/>approves or rejects"}}
-    HUMAN -->|"approved"| EXEC["Execute on simulator<br/>rollback, errors stop"]
-    HUMAN -->|"rejected"| NOOP["No action taken<br/>decision recorded"]
-    EXEC --> RES["8. Resolution<br/>metrics return to baseline"]
-    RES --> PM["9. Postmortem<br/>drafted from the timeline"]
+    GATE -->|approve| FIX["Rollback<br/>errors stop"]:::human
+    GATE -->|reject| STOP["No action<br/>logged"]:::human
+    FIX --> RES["8. Resolve"]:::done
+    RES --> PM["9. Postmortem"]:::done
 
-    INC -.->|"every stage logs to"| TL[("Timeline<br/>audit trail")]
+    DET -.-> TL[("Timeline<br/>audit trail")]:::core
     TL -.-> PM
 
-    classDef done fill:#12331b,stroke:#3FB950,color:#E7EAF0;
-    classDef human fill:#3a2f10,stroke:#E3B341,color:#E7EAF0;
-    classDef core fill:#1a2233,stroke:#6E8BFF,color:#E7EAF0;
-    class DET,SIG,DIAG,RB,IMP,BRIEF,REM,RES,PM done;
-    class HUMAN,EXEC,NOOP human;
-    class INC,TL,SIM core;
+    classDef done fill:#0f2417,stroke:#3FB950,color:#E7EAF0;
+    classDef human fill:#2e2610,stroke:#E3B341,color:#E7EAF0;
+    classDef core fill:#161d2e,stroke:#6E8BFF,color:#E7EAF0;
 ```
 
 The single `Incident` object is the contract every stage speaks. When simulated sources are later swapped for real APIs (GitHub, Datadog, Slack), nothing downstream changes, because everything reads the same object.
@@ -68,9 +60,9 @@ Because the simulator provides ground truth, bisect measures whether diagnosis r
 | Mode | Commit top-1 | Commit top-3 | Runbook hit | Latency |
 | --- | :---: | :---: | :---: | :---: |
 | deterministic baseline | 33% | 100% | 100% | ~190 ms |
-| LLM diff-reading | pending | pending | 100% | pending |
+| LLM diff-reading | 100% | 100% | 100% | ~8-11 s |
 
-The baseline dropping to 33 percent top-1 on the hard set is the result that matters. It shows that service-matching and timing are not enough, and that reading the diff is what closes the gap. The bad commit stays in the top 3 every run, so the ranker's job is to reorder, not to find a needle. The LLM row is wired in and runs the moment an API key is present. It is left as pending rather than reporting a number that has not yet been measured.
+The baseline dropping to 33 percent top-1 on the hard set is the result that matters. It shows that service-matching and timing are not enough, and that reading the diff is what closes the gap. The bad commit stays in the top 3 every run, so the ranker's job is to reorder, not to find a needle. Across 5 runs the LLM diff-reading ranker recovered the correct commit at 100 percent top-1, versus 33 percent for the deterministic baseline, because it reads the actual diffs and is not fooled by the decoy that only added a comment. The trade-off is latency: roughly 8 to 11 seconds per incident against the baseline's 400 milliseconds, which is why a production system runs the fast baseline first and escalates to the model when the ranking is ambiguous.
 
 Runbook retrieval is measured separately and reaches 100 percent top-1 across the seeded failure types.
 
