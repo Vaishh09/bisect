@@ -1,4 +1,4 @@
-# bisect
+# Bisect
 
 An evidence-first AI incident investigator. When a production service breaks, bisect works out what broke, which commit likely caused it, which runbook applies, and how big the impact is, then posts a clean brief and drafts the postmortem once it is resolved.
 
