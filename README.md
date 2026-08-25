@@ -45,7 +45,7 @@ The single `Incident` object is the contract every stage speaks. When simulated 
 
 ## How "which commit caused it" works
 
-This is the hardest and most novel part. bisect stacks three cheap signals and reasons over them:
+This is the hardest and the most novel part. bisect stacks three cheap signals and reasons over them:
 
 1. **Time correlation.** The error spike starts right after a deploy landed. The closest preceding deploy is the prime suspect. This is the strongest single signal.
 2. **Blast radius.** The failing endpoint and the file named in the stack trace map to the files each recent commit touched. A commit that changed the checkout service is a better suspect for checkout errors than one that changed the docs.
